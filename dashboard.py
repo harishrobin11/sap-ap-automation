@@ -1,57 +1,42 @@
-# dashboard.py
+# Updated snippet for dashboard.py file processing logic
 import streamlit as st
 import pandas as pd
-import requests
 import os
+from extractor import extract_text_from_pdf, parse_invoice_fields
 
-st.set_page_config(page_title="AP Operations Dashboard", layout="wide")
-st.title("🛡️ Accounts Payable Audit & Automation Gateway")
+# ... (rest of your layout code) ...
 
-layout_left, layout_right = st.columns([1, 2])
-
-with layout_left:
-    st.header("📥 Ingest Document File")
-    uploaded = st.file_uploader("Upload Vendor Invoice PDF", type=["pdf"])
+if uploaded is not None:
+    st.info("Processing document using native cloud processing engine...")
     
-    if uploaded is not None:
-        with st.spinner("Processing through API gateway integration..."):
-            files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
-            try:
-                res = requests.post("http://127.0.0.1:8000/api/v1/invoice/process", files=files)
-                if res.status_code == 200:
-                    output = res.json()
-                    status = output["status"]
-                    
-                    if status == "AUTO_POST_READY":
-                        st.success("✅ AUTO-POST READY")
-                    elif status == "BLOCK_PRICE_VARIANCE":
-                        st.error(f"❌ {status}")
-                    else:
-                        st.warning(f"⚠️ {status}")
-                        
-                    st.write(f"**System Note:** {output['audit_note']}")
-                    st.json(output["comparison"])
-                else:
-                    st.error(f"Gateway connection error: {res.status_code}")
-            except requests.exceptions.ConnectionError:
-                st.error("API Gateway unreachable. Verify app.py is active on port 8000.")
-
-with layout_right:
-    st.header("📊 Global Batch Settlement Logs")
-    log_path = "data/erp_matching_audit_trail.csv"
+    # Save uploaded file temporarily on the cloud container
+    with open(uploaded.name, "wb") as f:
+        f.write(uploaded.getbuffer())
+        
+    # Execute extraction and matching logic natively on the server instance
+    text = extract_text_from_pdf(uploaded.name)
+    extracted = parse_invoice_fields(text)
     
-    if os.path.exists(log_path):
-        df = pd.read_csv(log_path)
+    # Run the 3-Way match rules against the master data
+    df = pd.read_csv("data/sap_po_master.csv")
+    po_record = df[df["po_number"] == extracted.get("po_number")]
+    
+    if not po_record.empty:
+        erp = po_record.iloc[0]
+        gstin_match = extracted["extracted_gstin"] == erp["vendor_gstin"]
+        price_variance = abs(extracted["extracted_taxable"] - erp["po_taxable"]) > 0.01
         
-        tot = len(df)
-        passed = len(df[df["matching_status"] == "AUTO_POST_READY"])
-        st_rate = (passed / tot) * 100 if tot > 0 else 0
-        
-        stat1, stat2 = st.columns(2)
-        stat1.metric("Straight-Through Processing Rate", f"{st_rate:.1f}%")
-        stat2.metric("Total Batch Logs Ingested", f"{tot} items")
-        
-        st.write("### Active Audit Matrix Logs")
-        st.dataframe(df, use_container_width=True)
+        if not gstin_match:
+            st.error("❌ BLOCK_VENDOR_MISMATCH: Vendor identity does not match ERP Master File!")
+        elif price_variance:
+            st.warning("⚠️ BLOCK_PRICE_VARIANCE: Invoiced pricing deviates from original PO limit.")
+        else:
+            st.success("✅ AUTO_POST_READY: 3-Way match cleared successfully.")
+            st.balloons()
+            
+        st.json({"Extracted Data": extracted, "ERP Reference": erp.to_dict()})
     else:
-        st.info("Run matcher.py first to build baseline log tables.")
+        st.error(f"PO Reference {extracted.get('po_number')} not found in ERP Master File.")
+        
+    # Clean up file copy
+    os.remove(uploaded.name)
