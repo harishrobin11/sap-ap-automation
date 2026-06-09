@@ -3,6 +3,12 @@ import pandas as pd
 import requests
 import os
 
+
+# Fallback to localhost if running locally, otherwise use the live web URL
+BACKEND_URL = st.secrets.get("BACKEND_URL", "http://localhost:8000")
+
+# Example API call construction
+# response = requests.post(f"{BACKEND_URL}/predict", files=files)
 st.set_page_config(page_title="ERP AP Control Center", layout="wide")
 
 st.title("🛡️ Enterprise Accounts Payable Automation Control Center")
