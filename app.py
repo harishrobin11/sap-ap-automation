@@ -93,6 +93,7 @@ if uploaded_file is not None:
             )
             
         # Raw Data Comparison Table block
+        # Raw Data Comparison Table block
         st.subheader("📊 System Sync Details")
         comparison_df = pd.DataFrame({
             "Metric/Field": ["Taxable Amount", "GSTIN Token Identity"],
@@ -100,4 +101,6 @@ if uploaded_file is not None:
             "Allowed by ERP Master File": [erp['po_taxable'], erp['vendor_gstin']],
             "Status Match": ["✅ Match" if not price_variance else "❌ Mismatch", "✅ Match" if gstin_match else "❌ Mismatch"]
         })
-        st.table(comparison_df)
+        
+        # FIX: Convert the entire dataframe to string format to satisfy Apache Arrow's parser
+        st.table(comparison_df.astype(str))
